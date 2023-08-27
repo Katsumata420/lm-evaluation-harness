@@ -42,6 +42,7 @@ def parse_args():
     parser.add_argument("--description_dict_path", default=None)
     parser.add_argument("--check_integrity", action="store_true")
     parser.add_argument("--verbose", action="store_true")
+    parser.add_argument("--write_out", action="store_true", default=False)
 
     return parser.parse_args()
 
@@ -101,6 +102,7 @@ def main():
         decontamination_ngrams_path=args.decontamination_ngrams_path,
         check_integrity=args.check_integrity,
         verbose=args.verbose,
+        write_out=args.write_out,
     )
 
     dumped = json.dumps(results, indent=2, ensure_ascii=False)

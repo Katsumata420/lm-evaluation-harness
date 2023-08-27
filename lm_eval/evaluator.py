@@ -24,6 +24,7 @@ def simple_evaluate(
     check_integrity=False,
     decontamination_ngrams_path=None,
     verbose=False,
+    write_out=False,
 ):
 
     """Instantiate and evaluate a model on a list of tasks.
@@ -51,6 +52,8 @@ def simple_evaluate(
         Dictionary of custom task descriptions of the form: `task_name: description`
     :param check_integrity: bool
         Whether to run the relevant part of the test suite for the tasks
+    :param write_out: bool
+        If True, write details about prompts and logits to json for all tasks
     :return
         Dictionary of results
     """
@@ -93,6 +96,7 @@ def simple_evaluate(
         description_dict=description_dict,
         decontamination_ngrams_path=decontamination_ngrams_path,
         verbose=verbose,
+        write_out=write_out,
     )
 
     # add info about the model and few shot config
@@ -125,6 +129,7 @@ def evaluate(
     description_dict=None,
     decontamination_ngrams_path=None,
     verbose=False,
+    write_out=False,
 ):
     """Instantiate and evaluate a model on a list of tasks.
 
@@ -142,6 +147,8 @@ def evaluate(
         Number of iterations for bootstrap statistics
     :param description_dict: dict[str, str]
         Dictionary of custom task descriptions of the form: `task_name: description`
+    :param write_out: bool
+        If True, write all prompts, logits and metrics to json for offline analysis
     :return
         Dictionary of results
     """
@@ -188,6 +195,7 @@ def evaluate(
 
     # TODO: we need unit tests & sanity checks or something to ensure that the return of `validation_docs` is stable
     docs = {}
+    write_out_info = {}
 
     docs_for_decontamination = collections.defaultdict(list)
 
@@ -210,6 +218,9 @@ def evaluate(
         rnd = random.Random()
         rnd.seed(42)
         rnd.shuffle(task_docs)
+
+        if write_out:
+            prompt_details = []
 
         description = (
             description_dict[task_name]
@@ -242,6 +253,10 @@ def evaluate(
                 doc=doc, num_fewshot=num_fewshot[idx], rnd=rnd, description=description
             )
             reqs = task.construct_requests(doc, ctx)
+
+            if write_out:
+                prompt_details.append({"doc_id": doc_id})
+
             if not isinstance(reqs, (list, tuple)):
                 reqs = [reqs]
             for i, req in enumerate(reqs):
@@ -249,6 +264,12 @@ def evaluate(
                 # i: index in requests for a single task instance
                 # doc_id: unique id that we can get back to a doc using `docs`
                 requests_origin[req.request_type].append((i, task_name, doc, doc_id))
+
+                if write_out:
+                    prompt_details[-1][f"prompt_{i}"] = "".join((map(lambda x: "".join(x), req.args)))
+
+        if write_out:
+            write_out_info[task_name] = prompt_details
 
     # Compare all tasks/sets at once to ensure a single training set scan
     if decontaminate:
@@ -278,6 +299,16 @@ def evaluate(
         for resp, (i, task_name, doc, doc_id) in zip(resps, requests_origin[reqtype]):
             process_res_queue[(task_name, doc_id)].append((i, resp))
 
+            if write_out:
+                write_out_info[task_name][doc_id][f"logit_{i}"] = resp
+                task = task_dict[task_name]
+                if isinstance(task, lm_eval.base.MultipleChoiceTask):
+                    write_out_info[task_name][doc_id]["truth"] = doc["gold"]
+                elif isinstance(task, lm_eval.tasks.winogrande.Winogrande):
+                    write_out_info[task_name][doc_id]["truth"] = task.answer_to_num[doc["answer"]]
+                else:
+                    write_out_info[task_name][doc_id]["truth"] = task.doc_to_target(doc)
+
     vals = collections.defaultdict(list)
     # holds detailed responses for error analysis
     details = collections.defaultdict(list)
@@ -296,6 +327,9 @@ def evaluate(
             del metrics["details"]
         for metric, value in metrics.items():
             vals[(task_name, metric)].append(value)
+
+            if write_out:
+                write_out_info[task_name][doc_id][metric] = str(value)
 
             # Re-use the evaluation for the decontaminated set by just ignoring the overlaps
             if decontaminate and task_name in overlaps:
@@ -327,6 +361,28 @@ def evaluate(
 
         if verbose and task_name in details:
             results[task_name]["details"] = details[task_name]
+
+    if write_out:
+        import json
+        import pathlib
+
+        output_base_path = (
+            pathlib.Path(output_base_path)
+            if output_base_path is not None
+            else pathlib.Path(".")
+        )
+        try:
+            output_base_path.mkdir(parents=True, exist_ok=False)
+        except FileExistsError:
+            pass
+
+        for task_name, _ in task_dict_items:
+            with open(
+                output_base_path.joinpath(f"{task_name}_write_out_info.json"),
+                "w",
+                encoding="utf-8",
+            ) as fp:
+                json.dump(write_out_info[task_name], fp, indent=4, ensure_ascii=False)
 
     return {"results": dict(results), "versions": dict(versions)}
 
