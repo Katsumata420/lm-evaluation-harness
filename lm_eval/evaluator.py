@@ -25,6 +25,7 @@ def simple_evaluate(
     decontamination_ngrams_path=None,
     verbose=False,
     write_out=False,
+    output_base_path=None,
 ):
 
     """Instantiate and evaluate a model on a list of tasks.
@@ -54,6 +55,8 @@ def simple_evaluate(
         Whether to run the relevant part of the test suite for the tasks
     :param write_out: bool
         If True, write details about prompts and logits to json for all tasks
+    :param output_base_path: str, optional
+        Directory to which detailed eval info will be written. Defaults to present working dir.
     :return
         Dictionary of results
     """
@@ -97,6 +100,7 @@ def simple_evaluate(
         decontamination_ngrams_path=decontamination_ngrams_path,
         verbose=verbose,
         write_out=write_out,
+        output_base_path=output_base_path,
     )
 
     # add info about the model and few shot config
@@ -130,6 +134,7 @@ def evaluate(
     decontamination_ngrams_path=None,
     verbose=False,
     write_out=False,
+    output_base_path=None,
 ):
     """Instantiate and evaluate a model on a list of tasks.
 
@@ -149,6 +154,8 @@ def evaluate(
         Dictionary of custom task descriptions of the form: `task_name: description`
     :param write_out: bool
         If True, write all prompts, logits and metrics to json for offline analysis
+    :param output_base_path: str, optional
+        Directory to which detailed eval info will be written. Defaults to present working dir.
     :return
         Dictionary of results
     """
@@ -266,7 +273,7 @@ def evaluate(
                 requests_origin[req.request_type].append((i, task_name, doc, doc_id))
 
                 if write_out:
-                    prompt_details[-1][f"prompt_{i}"] = "".join((map(lambda x: "".join(x), req.args)))
+                    prompt_details[-1][f"prompt_{i}"] = "".join((map(lambda x: "".join([str(x_) for x_ in x]), [req.args])))
 
         if write_out:
             write_out_info[task_name] = prompt_details
